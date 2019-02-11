@@ -1,201 +1,71 @@
 #include <math.h>
-#include <pthread.h>
 #include <stdlib.h>
-#include <string.h>
 #include "common.h"
 #include "dct.h"
-#include "tables.h"
-
-#include <stdio.h>
 
 #define ROUND2(x, n)    ((x + (1 << (n - 1))) >> n)
 
-static int cnt = 0;
+static int64_t cm[BLKSZ * BLKSZ];
 
-#define NUM_THREADS 8
-
-#define join_threads(threads) \
-do \
-{ \
-    for (int i = 0; i < NUM_THREADS; ++i) \
-        if (!joined_threads[i]) \
-            joined_threads[i] = pthread_join(threads[i], NULL) == 0; \
-} while (0)
-
-union domain
+void
+dct_init(void)
 {
-    uint8_t *sd;
-    int64_t *fd;
-};
+    int shift = (64 - 2 * ceilf(log2f(BLKSZ)) - 1);
 
-struct dct_ctx
-{
-    union domain src;
-    union domain dst;
-    int it;
-    unsigned int n;
-    int shift;
-    int maxcnt;
-};
+    for (int i = 0; i < BLKSZ ; ++i)
+        cm[0 * BLKSZ + i] = roundf((1UL << shift) / sqrtf(BLKSZ));
 
-static int64_t tmp[N_MAX * N_MAX];
-static pthread_t threads[NUM_THREADS] = {0};
-static int joined_threads[NUM_THREADS];
-static struct dct_ctx dct[NUM_THREADS];
-
-static void *
-dct_forward_0(void *arg)
-{
-    struct dct_ctx *dct = (struct dct_ctx *)arg;
-    for (int i = 0; i < dct->n; ++i)
-    {
-        int64_t sum = 0;
-        for (int j = 0; j < dct->n; ++j)
-            sum += dct->src.sd[i * dct->n + j]
-                * tb_dct_coefs[dct->it * N_MAX + j];
-        dct->dst.fd[dct->it * N_MAX + i] = ROUND2(sum, dct->shift);
-    }
-    for (int i = dct->n; i < N_MAX; ++i)
-        dct->dst.fd[dct->it * N_MAX + i] = 0;
-    return NULL;
-}
-
-static void *
-dct_forward_1(void *arg)
-{
-    struct dct_ctx *dct = (struct dct_ctx *)arg;
-    for (int v = 0; v < N_MAX; ++v)
-    {
-        int64_t sum = 0;
-        for (int i = 0; i < dct->n; ++i)
-            sum += dct->src.fd[v * N_MAX + i]
-                * ROUND2(tb_dct_coefs[dct->it * N_MAX + i], dct->shift);
-        dct->dst.fd[dct->it * N_MAX + v] = ROUND2(sum, dct->shift);
-    }
-    return NULL;
+    for (int i = 1; i < BLKSZ; ++i)
+        for (int j = 0; j < BLKSZ; ++j)
+            cm[i * BLKSZ + j] = roundf(
+                (1UL << shift) * sqrtf(2.f / BLKSZ) *
+                cos(i * (2.f * j + 1.f) * M_PI / (2.f * BLKSZ)));
 }
 
 void
-dct_forward(int64_t *freq_mtx, uint8_t *data_mtx, unsigned int n)
+dct_forward(int64_t *fm, uint8_t *sm, unsigned int stride)
 {
-    int shift = 2 * ((64 - 2 * ceilf(log2f(N_MAX)) - 1) / 4);
-    int maxcnt = 2 * N_MAX + 2 * n;
+    int shift = 2 * ((64 - 2 * ceilf(log2f(BLKSZ)) - 1) / 4);
+    int64_t tm[BLKSZ * BLKSZ];
 
-    for (int i = 0; i < NUM_THREADS; ++i)
-        joined_threads[i] = 1;
-
-    for (int v = 0; v < N_MAX; ++v)
-    {
-        dct[v % NUM_THREADS] = (struct dct_ctx)
+    for (int v = 0; v < BLKSZ; ++v)
+        for (int i = 0; i < BLKSZ; ++i)
         {
-            .src.sd = data_mtx,
-            .dst.fd = tmp,
-            .it = v,
-            .n = n,
-            .shift = shift,
-        };
-        if (pthread_create(threads + v % NUM_THREADS, NULL, dct_forward_0, dct + v % NUM_THREADS))
-            abort();
-        joined_threads[v % NUM_THREADS] = 0;
-        if ((v + 1) % NUM_THREADS == 0)
-            join_threads(threads);
-        fprintf(stderr, "\r%.3f%%", 100 * ++cnt / (float)maxcnt);
-    }
-    join_threads(threads);
-
-    for (int u = 0; u < N_MAX; ++u)
-    {
-        dct[u % NUM_THREADS] = (struct dct_ctx)
+            int64_t sum = 0;
+            for (int j = 0; j < BLKSZ; ++j)
+                sum += sm[i * stride + j] * cm[v * BLKSZ + j];
+            tm[v * stride + i] = ROUND2(sum, shift);
+        }
+    for (int u = 0; u < BLKSZ; ++u)
+        for (int v = 0; v < BLKSZ; ++v)
         {
-            .src.fd = tmp,
-            .dst.fd = freq_mtx,
-            .it = u,
-            .n = n,
-            .shift = shift,
-        };
-        if (pthread_create(threads + u % NUM_THREADS, NULL, dct_forward_1, dct + u % NUM_THREADS))
-            abort();
-        joined_threads[u % NUM_THREADS] = 0;
-        if ((u + 1) % NUM_THREADS == 0)
-            join_threads(threads);
-        fprintf(stderr, "\r%.3f%%", 100 * ++cnt / (float)maxcnt);
-    }
-    join_threads(threads);
-}
-
-static void *
-dct_backward_0(void *arg)
-{
-    struct dct_ctx *dct = (struct dct_ctx *)arg;
-    for (int u = 0; u < N_MAX; ++u)
-    {
-        int64_t sum = 0;
-        for (int v = 0; v < N_MAX; ++v)
-            sum += dct->src.fd[u * N_MAX + v]
-                * ROUND2(tb_dct_coefs[v * N_MAX + dct->it], dct->shift);
-        dct->dst.fd[dct->it * N_MAX + u] = ROUND2(sum, dct->shift);
-    }
-    return NULL;
-}
-
-static void *
-dct_backward_1(void *arg)
-{
-    struct dct_ctx *dct = (struct dct_ctx *)arg;
-    for (int j = 0; j < dct->n; ++j)
-    {
-        int64_t sum = 0;
-        for (int u = 0; u < N_MAX; ++u)
-            sum += dct->src.fd[j * N_MAX + u]
-                * ROUND2(tb_dct_coefs[u * N_MAX + dct->it], dct->shift);
-        ((int8_t *)dct->dst.sd)[dct->it * dct->n + j] = ROUND2(sum, 2 * dct->shift);
-    }
-    return NULL;
+            int64_t sum = 0;
+            for (int i = 0; i < BLKSZ; ++i)
+                sum += tm[v * stride + i] * ROUND2(cm[u * BLKSZ + i], shift);
+            fm[u * stride + v] = ROUND2(sum, shift);
+        }
 }
 
 void
-dct_backward(int8_t *data_mtx, int64_t *freq_mtx, unsigned int n)
+dct_backward(int8_t *sm, int64_t *fm, unsigned int stride)
 {
-    int shift = 2 * ((64 - 2 * ceilf(log2f(N_MAX)) - 1) / 4);
-    int maxcnt = 2 * N_MAX + 2 * n;
+    int shift = 2 * ((64 - 2 * ceilf(log2f(BLKSZ)) - 1) / 4);
+    int64_t tm[BLKSZ * BLKSZ];
 
-    for (int i = 0; i < NUM_THREADS; ++i)
-        joined_threads[i] = 1;
-
-    for (int j = 0; j < n; ++j)
-    {
-        dct[j % NUM_THREADS] = (struct dct_ctx)
+    for (int j = 0; j < BLKSZ; ++j)
+        for (int u = 0; u < BLKSZ; ++u)
         {
-            .src.fd = freq_mtx,
-            .dst.fd = tmp,
-            .it = j,
-            .shift = shift,
-        };
-        if (pthread_create(threads + j % NUM_THREADS, NULL, dct_backward_0, dct + j % NUM_THREADS))
-            abort();
-        joined_threads[j % NUM_THREADS] = 0;
-        if ((j + 1) % NUM_THREADS == 0)
-            join_threads(threads);
-        fprintf(stderr, "\r%.3f%%", 100 * ++cnt / (float)maxcnt);
-    }
-    join_threads(threads);
-
-    for (int i = 0; i < n; ++i)
-    {
-        dct[i % NUM_THREADS] = (struct dct_ctx)
+            int64_t sum = 0;
+            for (int v = 0; v < BLKSZ; ++v)
+                sum += fm[u * stride + v] * ROUND2(cm[v * BLKSZ + j], shift);
+            tm[j * stride + u] = ROUND2(sum, shift);
+        }
+    for (int i = 0; i < BLKSZ; ++i)
+        for (int j = 0; j < BLKSZ; ++j)
         {
-            .src.fd = tmp,
-            .dst.sd = (uint8_t *)data_mtx,
-            .it = i,
-            .n = n,
-            .shift = shift,
-        };
-        if (pthread_create(threads + i % NUM_THREADS, NULL, dct_backward_1, dct + i % NUM_THREADS))
-            abort();
-        joined_threads[i % NUM_THREADS] = 0;
-        if ((i + 1) % NUM_THREADS == 0)
-            join_threads(threads);
-        fprintf(stderr, "\r%.3f%%", 100 * ++cnt / (float)maxcnt);
-    }
-    join_threads(threads);
+            int64_t sum = 0;
+            for (int u = 0; u < BLKSZ; ++u)
+                sum += tm[j * stride + u] * ROUND2(cm[u * BLKSZ + i], shift);
+            ((int8_t *)sm)[i * stride + j] = ROUND2(sum, 2 * shift);
+        }
 }

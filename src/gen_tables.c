@@ -9,16 +9,6 @@
 static void
 dct_init_coefs(int64_t dct_coefs[N_MAX * N_MAX])
 {
-    int shift = (64 - 2 * ceilf(log2f(N_MAX)) - 1);
-
-    for (int i = 0; i < N_MAX; ++i)
-        dct_coefs[0 * N_MAX + i] = roundf((1UL << shift) / sqrtf(N_MAX));
-
-    for (int i = 1; i < N_MAX; ++i)
-        for (int j = 0; j < N_MAX; ++j)
-            dct_coefs[i * N_MAX + j] = roundf(
-                (1UL << shift) * sqrtf(2.f / N_MAX) *
-                cos(i * (2.f * j + 1.f) * M_PI / (2.f * N_MAX)));
 }
 
 #define BUFSZ   (1 << 14)

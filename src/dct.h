@@ -3,7 +3,8 @@
 
 # include <stdint.h>
 
-void dct_forward(int64_t *freq_mtx, uint8_t *data_mtx, unsigned int n);
-void dct_backward(int8_t *data_mtx, int64_t *freq_mtx, unsigned int n);
+void dct_init(void);
+void dct_forward(int64_t *fm, uint8_t *sm, unsigned int stride);
+void dct_backward(int8_t *sm, int64_t *fm, unsigned int stride);
 
 #endif

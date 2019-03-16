@@ -1,9 +1,13 @@
 common_sources = files(
     'main.c')
 
-btenc_sources = files()
+btenc_sources = files(
+    'enc_read_input.c',
+    'enc_write_output.c')
 
-btdec_sources = files()
+btdec_sources = files(
+    'dec_read_input.c',
+    'dec_write_output.c')
 
 btenc = executable('btenc', common_sources, btenc_sources,
     c_args: ['-DPROGRAM_NAME="btenc"', '-DBTCODE_ENCODE'],

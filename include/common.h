@@ -1,8 +1,10 @@
 #ifndef COMMON_H
 # define COMMON_H
 
+# include <errno.h>
 # include <stddef.h>
 # include <stdint.h>
+# include <stdlib.h>
 
 # ifndef NDEBUG
 #  include <stdio.h>

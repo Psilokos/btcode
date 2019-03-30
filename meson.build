@@ -3,6 +3,8 @@ project('btcode', 'c',
     default_options: ['buildtype=release',
                       'b_ndebug=if-release'])
 
-subdir('include')
+btcode_inc_dir = include_directories('include')
+
 subdir('src')
 subdir('tools')
+subdir('tests')

@@ -8,7 +8,7 @@ check_dct(void)
 {
     int ret = BTCODE_SUCCESS;
 
-    int const n = rand() % 128 + 1;
+    int const n = rand() % 192 + 1;
     int const n2 = n * n;
 
     uint8_t *sm_in = NULL;

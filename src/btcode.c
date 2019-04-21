@@ -11,8 +11,9 @@ btcode_encode(uint8_t **outbuf_ptr, size_t *outbuf_size_ptr,
     uint16_t const n2 = btable_n * btable_n;
     float *freq_mtx = malloc(n2 * sizeof(*freq_mtx));
     if (!freq_mtx) goto alloc_error;
+    if (dct_init(btable_n)) goto alloc_error;
 
-    dct_forward(freq_mtx, btable, btable_n);
+    dct_forward(freq_mtx, btable);
 
     *outbuf_size_ptr = sizeof(uint16_t) + n2 * sizeof(*freq_mtx);
     uint8_t *outbuf = malloc(*outbuf_size_ptr);
@@ -28,6 +29,7 @@ alloc_error:
     fprintf(stderr, "failed to allocate memory: %s\n", strerror(errno));
     ret = BTCODE_ERR(errno);
 ret:
+    dct_destroy();
     free(freq_mtx);
     return ret;
 }
@@ -43,8 +45,9 @@ btcode_decode(uint8_t **btable_ptr, size_t *btable_n_ptr,
 
     uint8_t *btable = malloc(n * n);
     if (!btable) goto alloc_error;
+    if (dct_init(n)) goto alloc_error;
 
-    dct_backward(btable, freq_mtx, n);
+    dct_backward(btable, freq_mtx);
 
     *btable_ptr = btable;
     *btable_n_ptr = n;
@@ -54,5 +57,6 @@ alloc_error:
     fprintf(stderr, "failed to allocate memory: %s\n", strerror(errno));
     ret = BTCODE_ERR(errno);
 ret:
+    dct_destroy();
     return ret;
 }

@@ -8,7 +8,7 @@ check_dct(void)
 {
     int ret = BTCODE_SUCCESS;
 
-    int const n = rand() % 64 + 1;
+    int const n = rand() % 128 + 1;
     int const n2 = n * n;
 
     uint8_t *sm_in = NULL;
@@ -18,12 +18,13 @@ check_dct(void)
     sm_in = malloc(n2); if (!sm_in) goto alloc_error;
     sm_out = malloc(n2); if (!sm_out) goto alloc_error;
     fm = malloc(n2 * sizeof(*fm)); if (!fm) goto alloc_error;
+    ret = dct_init(n); if (ret) goto alloc_error;
 
     for (int i = 0; i < n2; ++i)
         sm_in[i] = rand() % 256;
 
-    dct_forward(fm, sm_in, n);
-    dct_backward(sm_out, fm, n);
+    dct_forward(fm, sm_in);
+    dct_backward(sm_out, fm);
 
     if (memcmp(sm_in, sm_out, n2))
         goto test_failed;
@@ -35,6 +36,7 @@ alloc_error:
 test_failed:
     ret = BTCODE_EGENERIC;
 ret:
+    dct_destroy();
     free(sm_in);
     free(sm_out);
     free(fm);

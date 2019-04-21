@@ -3,7 +3,9 @@
 
 # include "common.h"
 
-void dct_forward(float *freq_mtx, uint8_t const *spatial_mtx, uint16_t const n);
-void dct_backward(uint8_t *spatial_mtx, float const *freq_mtx, uint16_t const n);
+int  dct_init(uint16_t const n);
+void dct_destroy(void);
+void dct_forward(float *freq_mtx, uint8_t const *spatial_mtx);
+void dct_backward(uint8_t *spatial_mtx, float const *freq_mtx);
 
 #endif

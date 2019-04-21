@@ -1,47 +1,77 @@
 #include <math.h>
 #include "common.h"
 
-void
-dct_forward(float *fm, uint8_t const *sm, uint16_t const n)
+static float *tm;
+static uint16_t n;
+
+int
+dct_init(uint16_t const n_)
 {
+    n = n_;
+    tm = malloc(n * n * sizeof(*tm));
+    return tm ? BTCODE_SUCCESS : BTCODE_ERR(errno);
+}
+
+void
+dct_destroy(void)
+{
+    free(tm);
+}
+
+void
+dct_forward(float *fm, uint8_t const *sm)
+{
+    for (int v = 0; v < n; ++v)
+        for (int i = 0; i < n; ++i)
+        {
+            float sum = 0;
+            for (int j = 0; j < n; ++j)
+            {
+                float coef = cos(v * (2.f * j + 1.f) * M_PI / (2.f * n));
+                sum += 2 * sm[i * n + j] * coef;
+            }
+            tm[v * n + i] = sum;
+        }
+
     for (int u = 0; u < n; ++u)
         for (int v = 0; v < n; ++v)
         {
-            fm[u * n + v] = .0f;
+            float sum = 0;
             for (int i = 0; i < n; ++i)
             {
-                float sum = .0f;
-                for (int j = 0; j < n; ++j)
-                {
-                    float coef = cos(v * (2.f * j + 1.f) * M_PI / (2.f * n));
-                    sum += 2 * sm[i * n + j] * coef;
-                }
                 float coef = cos(u * (2.f * i + 1.f) * M_PI / (2.f * n));
-                fm[u * n + v] += 2 * sum * coef;
+                sum += 2 * tm[v * n + i] * coef;
             }
+            fm[u * n + v] = sum;
         }
 }
 
 void
-dct_backward(uint8_t *sm, float const *fm, uint16_t const n)
+dct_backward(uint8_t *sm, float const *fm)
 {
+    for (int j = 0; j < n; ++j)
+        for (int u = 0; u < n; ++u)
+        {
+            float sum = 0;
+            for (int v = 0; v < n; ++v)
+            {
+                float cv = !v ? .5f : 1.f;
+                float coef = cos(v * (2.f * j + 1.f) * M_PI / (2.f * n));
+                sum += cv * fm[u * n + v] * coef;
+            }
+            tm[j * n + u] = sum;
+        }
+
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
         {
-            float sum_u = .0f;
+            float sum = 0;
             for (int u = 0; u < n; ++u)
             {
-                float sum_v = .0f;
-                for (int v = 0; v < n; ++v)
-                {
-                    float cv = !v ? .5f : 1.f;
-                    float coef = cos(v * (2.f * j + 1.f) * M_PI / (2.f * n));
-                    sum_v += cv * fm[u * n + v] * coef;
-                }
                 float cu = !u ? .5f : 1.f;
                 float coef = cos(u * (2.f * i + 1) * M_PI / (2.f * n));
-                sum_u += cu * sum_v * coef;
+                sum += cu * tm[j * n + u] * coef;
             }
-            sm[i * n + j] = roundf(sum_u / (n * n));
+            sm[i * n + j] = roundf(sum / (n * n));
         }
 }

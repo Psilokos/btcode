@@ -8,17 +8,17 @@ check_dct(void)
 {
     int ret = BTCODE_SUCCESS;
 
-    int const n = rand() % 192 + 1;
+    int const n = rand() % 256 + 1;
     int const n2 = n * n;
 
     uint8_t *sm_in = NULL;
     uint8_t *sm_out = NULL;
-    float *fm = NULL;
+    int64_t *fm = NULL;
 
     sm_in = malloc(n2); if (!sm_in) goto alloc_error;
     sm_out = malloc(n2); if (!sm_out) goto alloc_error;
     fm = malloc(n2 * sizeof(*fm)); if (!fm) goto alloc_error;
-    ret = dct_init(n); if (ret) goto alloc_error;
+    ret = dct_init(n, 0xFF); if (ret) goto alloc_error;
 
     for (int i = 0; i < n2; ++i)
         sm_in[i] = rand() % 256;

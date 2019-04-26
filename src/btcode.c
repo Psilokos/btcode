@@ -9,9 +9,9 @@ btcode_encode(uint8_t **outbuf_ptr, size_t *outbuf_size_ptr,
     int ret = BTCODE_SUCCESS;
 
     uint16_t const n2 = btable_n * btable_n;
-    float *freq_mtx = malloc(n2 * sizeof(*freq_mtx));
+    int64_t *freq_mtx = malloc(n2 * sizeof(*freq_mtx));
     if (!freq_mtx) goto alloc_error;
-    if (dct_init(btable_n)) goto alloc_error;
+    if (dct_init(btable_n, 1)) goto alloc_error;
 
     dct_forward(freq_mtx, btable);
 
@@ -41,11 +41,11 @@ btcode_decode(uint8_t **btable_ptr, size_t *btable_n_ptr,
     int ret = BTCODE_SUCCESS;
 
     uint16_t const n = *(uint16_t *)inbuf;
-    float *freq_mtx = (void *)inbuf + sizeof(uint16_t);
+    int64_t *freq_mtx = (void *)inbuf + sizeof(uint16_t);
 
     uint8_t *btable = malloc(n * n);
     if (!btable) goto alloc_error;
-    if (dct_init(n)) goto alloc_error;
+    if (dct_init(n, 1)) goto alloc_error;
 
     dct_backward(btable, freq_mtx);
 

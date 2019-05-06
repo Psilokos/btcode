@@ -1,12 +1,11 @@
 #include <math.h>
+#include <string.h>
 #include "common.h"
+#include "tables.h"
 
 #define ROUND2(x, n)    (((x) + (1LL << ((n) - 1))) >> (n))
 
-static int64_t *cm;
-static int64_t *tm;
-static uint16_t n;
-static unsigned shift;
+static int64_t tm[N_MAX * N_MAX];
 
 static inline unsigned int
 log2i(uint32_t const x)
@@ -15,82 +14,62 @@ log2i(uint32_t const x)
     return base + (__builtin_ctz(x) != base);
 }
 
-int
-dct_init(uint16_t const n_, unsigned const max)
+void
+dct_forward(int64_t *fm, uint8_t const *sm, uint16_t const n)
 {
-    n = n_;
-    cm = malloc(n * n * sizeof(*cm)); if (!cm) return errno;
-    tm = malloc(n * n * sizeof(*tm)); if (!tm) return errno;
-
     /* precision bits = (64 - sign_bit - 2 * log2(n) - log2(x) - log2(4)) / 2 */
-    shift = (64 - 1 - 2 * log2i(n) - log2i(max) - 2) / 2;
+    unsigned const shift = (64 - 1 - 2 * log2i(N_MAX) - 0 - 2) / 2;
 
-    for (int u = 0; u < n; ++u)
-        for (int i = 0; i < n; ++i)
-            cm[u * n + i] = roundf(
-                    (1LL << shift) *
-                    cosf(u * (2.f * i + 1.f) * M_PI / (2.f * n)));
-
-    return BTCODE_SUCCESS;
-}
-
-void
-dct_destroy(void)
-{
-    free(cm);
-    free(tm);
-}
-
-void
-dct_forward(int64_t *fm, uint8_t const *sm)
-{
-    for (int v = 0; v < n; ++v)
+    for (int v = 0; v < N_MAX; ++v)
         for (int i = 0; i < n; ++i)
         {
             int64_t sum = 0;
             for (int j = 0; j < n; ++j)
-                sum += 2 * sm[i * n + j] * cm[v * n + j];
-            tm[v * n + i] = sum;
+                sum += 2 * sm[i * n + j] * tb_dct_coefs[v * N_MAX + j];
+            tm[v * N_MAX + i] = sum;
         }
 
-    for (int u = 0; u < n; ++u)
-        for (int v = 0; v < n; ++v)
+    for (int u = 0; u < N_MAX; ++u)
+        for (int v = 0; v < N_MAX; ++v)
         {
             int64_t sum = 0;
             for (int i = 0; i < n; ++i)
-                sum += 2 * tm[v * n + i] * cm[u * n + i];
-            fm[u * n + v] = ROUND2(sum, 2 * shift);
+                sum += 2 * tm[v * N_MAX + i] * tb_dct_coefs[u * N_MAX + i];
+            fm[u * N_MAX + v] = ROUND2(sum, 2 * shift);
         }
 }
 
 void
-dct_backward(uint8_t *sm, int64_t const *fm)
+dct_backward(uint8_t *sm, int64_t const *fm, uint16_t const n)
 {
+    /* precision bits = (64 - sign_bit - 2 * log2(n) - log2(x) - log2(4)) / 2 */
+    unsigned const shift = (64 - 1 - 2 * log2i(N_MAX) - 0 - 2) / 2;
+
     for (int j = 0; j < n; ++j)
-        for (int u = 0; u < n; ++u)
+        for (int u = 0; u < N_MAX; ++u)
         {
             int64_t sum = 0;
-            for (int v = 0; v < n; ++v)
+            for (int v = 0; v < N_MAX; ++v)
             {
-                int64_t tmp = fm[u * n + v] * cm[v * n + j];
+                int64_t tmp = fm[u * N_MAX + v] * tb_dct_coefs[v * N_MAX + j];
                 if (v == 0)
                     tmp = ROUND2(tmp, 1);
                 sum += tmp;
             }
-            tm[j * n + u] = sum;
+            tm[j * N_MAX + u] = sum;
         }
 
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
         {
             int64_t sum = 0;
-            for (int u = 0; u < n; ++u)
+            for (int u = 0; u < N_MAX; ++u)
             {
-                int64_t tmp = tm[j * n + u] * cm[u * n + i];
+                int64_t tmp = tm[j * N_MAX + u] * tb_dct_coefs[u * N_MAX + i];
                 if (u == 0)
                     tmp = ROUND2(tmp, 1);
                 sum += tmp;
             }
-            sm[i * n + j] = ROUND2(sum / (n * n), 2 * shift);
+            sm[i * n + j] = ROUND2(sum / (N_MAX * N_MAX), 2 * shift);
         }
 }

@@ -4,6 +4,9 @@
 #include "common.h"
 #include "tables.h"
 
+#include <stdio.h>
+static int cnt;
+
 #define NUM_THREADS 8
 
 #define join_threads(threads) \
@@ -84,6 +87,8 @@ dct_forward(int64_t *fm, uint8_t const *sm, uint16_t const n)
 {
     /* precision bits = (64 - sign_bit - 2 * log2(n) - log2(x) - log2(4)) / 2 */
     unsigned const shift = (64 - 1 - 2 * log2i(N_MAX) - 0 - 2) / 2;
+    int maxcnt = 2 * N_MAX + 2 * n;
+    cnt = 0;
 
     for (int i = 0; i < NUM_THREADS; ++i)
         joined_threads[i] = 1;
@@ -104,6 +109,7 @@ dct_forward(int64_t *fm, uint8_t const *sm, uint16_t const n)
         joined_threads[v % NUM_THREADS] = 0;
         if ((v + 1) % NUM_THREADS == 0)
             join_threads(threads);
+        fprintf(stderr, "\r%.3f%%", 100.f * ++cnt / maxcnt);
     }
     join_threads(threads);
 
@@ -123,6 +129,7 @@ dct_forward(int64_t *fm, uint8_t const *sm, uint16_t const n)
         joined_threads[u % NUM_THREADS] = 0;
         if ((u + 1) % NUM_THREADS == 0)
             join_threads(threads);
+        fprintf(stderr, "\r%.3f%%", 100.f * ++cnt / maxcnt);
     }
     join_threads(threads);
 }
@@ -173,6 +180,7 @@ dct_backward(uint8_t *sm, int64_t const *fm, uint16_t const n)
 {
     /* precision bits = (64 - sign_bit - 2 * log2(n) - log2(x) - log2(4)) / 2 */
     unsigned const shift = (64 - 1 - 2 * log2i(N_MAX) - 0 - 2) / 2;
+    int const maxcnt = 2 * N_MAX + 2 * n;
 
     for (int i = 0; i < NUM_THREADS; ++i)
         joined_threads[i] = 1;
@@ -192,6 +200,7 @@ dct_backward(uint8_t *sm, int64_t const *fm, uint16_t const n)
         joined_threads[j % NUM_THREADS] = 0;
         if ((j + 1) % NUM_THREADS == 0)
             join_threads(threads);
+        fprintf(stderr, "\r%.3f%%", 100.f * ++cnt / maxcnt);
     }
     join_threads(threads);
 
@@ -211,6 +220,7 @@ dct_backward(uint8_t *sm, int64_t const *fm, uint16_t const n)
         joined_threads[i % NUM_THREADS] = 0;
         if ((i + 1) % NUM_THREADS == 0)
             join_threads(threads);
+        fprintf(stderr, "\r%.3f%%", 100.f * ++cnt / maxcnt);
     }
     join_threads(threads);
 }

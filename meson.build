@@ -1,5 +1,5 @@
 project('btcode', 'c',
-    version: '0.0.0',
+    version: '0.0.1',
     default_options: ['buildtype=release',
                       'b_ndebug=if-release'])
 

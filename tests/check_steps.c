@@ -3,29 +3,29 @@
 #include <time.h>
 #include "dct.h"
 
+#define BLKSZ2 (BLKSZ * BLKSZ)
+
 static int
 check_dct(void)
 {
     int ret = BTCODE_SUCCESS;
 
-    int const n = rand() % N_MAX + 1;
-    int const n2 = n * n;
-
     uint8_t *sm_in = NULL;
     uint8_t *sm_out = NULL;
     int64_t *fm = NULL;
 
-    sm_in = malloc(n2); if (!sm_in) goto alloc_error;
-    sm_out = malloc(n2); if (!sm_out) goto alloc_error;
-    fm = malloc(N_MAX * N_MAX * sizeof(*fm)); if (!fm) goto alloc_error;
+    sm_in = malloc(BLKSZ2); if (!sm_in) goto alloc_error;
+    sm_out = malloc(BLKSZ2); if (!sm_out) goto alloc_error;
+    fm = malloc(BLKSZ2 * sizeof(*fm)); if (!fm) goto alloc_error;
 
-    for (int i = 0; i < n2; ++i)
+    for (int i = 0; i < BLKSZ2; ++i)
         sm_in[i] = rand() & 1;
 
-    dct_forward(fm, sm_in, n);
-    dct_backward(sm_out, fm, n);
+    dct_init(BLKSZ);
+    dct_forward(fm, sm_in);
+    dct_backward(sm_out, fm);
 
-    if (memcmp(sm_in, sm_out, n2))
+    if (memcmp(sm_in, sm_out, BLKSZ2))
         goto test_failed;
     goto ret;
 

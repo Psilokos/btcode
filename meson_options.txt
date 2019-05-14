@@ -1,1 +1,1 @@
-option('N_MAX', type: 'integer', min: 1, max: 65536, value: 1024) # FIXME is it [min;max[ ???
+option('BLKSZ', type: 'integer', min: 1, max: 256, value: 32) # FIXME is it [min;max[ ???

@@ -16,15 +16,10 @@ freqcmp(void const *f0ptr, void const *f1ptr)
     return delta < 0 ? -1 : 1;
 }
 
-static int
+static void
 filter_freqs(int64_t *freq_mtx, uint16_t const n, float const threshold)
 {
-    int ret = BTCODE_SUCCESS;
-
-    struct { int64_t key; int val; } *freq_dict;
-    freq_dict = malloc(BLKSZ2 * sizeof(*freq_dict));
-    if (!freq_dict)
-        goto error;
+    struct { int64_t key; int val; } freq_dict[BLKSZ2];
 
     for (int i = 0; i < BLKSZ; ++i)
         for (int j = 0; j < BLKSZ; ++j)
@@ -38,15 +33,6 @@ filter_freqs(int64_t *freq_mtx, uint16_t const n, float const threshold)
 
     for (int i = 0; (float)i / BLKSZ2 < threshold; ++i)
         freq_mtx[freq_dict[i].val] = 0;
-
-    goto ret;
-
-error:
-    fprintf(stderr, "failed to allocate memory: %s\n", strerror(errno));
-    ret = BTCODE_ERR(errno);
-ret:
-    free(freq_dict);
-    return ret;
 }
 
 typedef void (*tfblk_fptr)(uint8_t *, int64_t *, uint8_t const *, uint16_t);
@@ -72,63 +58,60 @@ count_residuals(uint8_t const *sm0, uint8_t const *sm1, uint16_t const n)
     return cnt;
 }
 
+static uint8_t total_residual_count;
+
 static void
 enc_tfblk(uint8_t *sm_out, int64_t *fm, uint8_t const *sm_in, uint16_t const n)
 {
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
     dct_forward(fm, sm_in);
 
     size_t const fm_size = (n * (BLKSZ - 1) + BLKSZ) * sizeof(int64_t);
     int64_t *fm_tmp = malloc(fm_size);
 
-    float threshold = .001f;
-    float delta = .0f;
-    unsigned int prev_cnt = 0;
+    pthread_mutex_lock(&mutex);
+    unsigned int limit = total_residual_count == 255 ? 0 : 1;
+    int limit_reached = 0;
+    int dir = -1;
+    float delta = .1f;
+    float threshold = 1.f;
     while (1)
     {
         memcpy(fm_tmp, fm, fm_size);
         filter_freqs(fm_tmp, n, threshold);
         dct_backward(sm_out, fm_tmp);
-        unsigned int const cnt = count_residuals(sm_in, sm_out, n);
-#if 0
-        if (cnt >= 1 || threshold + .001f >= 1.f)
+
+        unsigned int cnt = count_residuals(sm_in, sm_out, n);
+        if (cnt == 0 && threshold == 1.f)
             break;
-        threshold += .001f;
-#else
-        if (cnt > prev_cnt)
+        if (dir == -1)
         {
-            if (delta == .0f)
-                delta = -.25f;
-            else
-                delta = -delta / 2.f;
+            if (cnt <= limit)
+            {
+                if (limit_reached || threshold == 1.f)
+                {
+                    total_residual_count += cnt;
+                    break;
+                }
+                dir = +1;
+                delta /= 10.f;
+            }
         }
-        else if (cnt < prev_cnt)
-            delta = +delta / 2;
-        else
+        else if (dir == +1)
         {
-            if (delta == .0f)
-                delta = +.5f;
-            else
-                break;
+            if (cnt > limit)
+            {
+                limit_reached = 1;
+                dir = -1;
+                delta /= 10.f;
+            }
         }
-        threshold += delta;
-        prev_cnt = cnt;
-#endif
+        threshold += dir * delta;
     }
-#if 0
-    if (threshold < 1.f)
-    {
-        threshold -= .001f;
-        filter_freqs(fm, n, threshold);
-        dct_backward(sm_out, fm);
-        printf("cnt => %u\n", count_residuals(sm_in, sm_out, n));
-    }
-    else
-        memcpy(fm, fm_tmp, fm_size);
-#else
+    pthread_mutex_unlock(&mutex);
     memcpy(fm, fm_tmp, fm_size);
-#endif
     free(fm_tmp);
-    fprintf(stderr, "threshold used => %f\n", threshold);
 }
 
 static void
@@ -173,6 +156,7 @@ frequency_transform(uint8_t *spatial_mtx_out,
     int ret = BTCODE_SUCCESS;
 
     dct_init(n);
+    total_residual_count = 0;
 
     pthread_t threads[NUM_THREADS] = {0};
     struct tfblk_ctx ctx[NUM_THREADS];
@@ -235,7 +219,7 @@ encode_frequencies(int64_t **buf_ptr, size_t *bufsize_ptr,
                     if (!has_freq)
                     {
                         // TODO 32-bit freqs
-                        buf[size >> 3] = i;
+                        buf[size >> 3] = ((uint64_t) i << 32) | (0x2A * 0x01010101);
                         size += 8;
                         ++cnt;
                     }
@@ -260,8 +244,8 @@ encode_frequencies(int64_t **buf_ptr, size_t *bufsize_ptr,
         }
 #endif
     }
-    printf("encoded %lu \"\"\"frequencies\"\"\"\n", size >> 3);
-    printf("%u / %u blocks with frequencies\n", cnt, n2 / BLKSZ2);
+    printf("%u / %u blocks with frequencies (%.3f%%)\n", cnt, n2 / BLKSZ2, (float)cnt * BLKSZ2 / n2);
+    printf("encoded %lu \"\"\"frequencies\"\"\" (%lu bytes)\n", size >> 3, size);
 
     *bufsize_ptr = size;
     goto ret;
@@ -291,7 +275,7 @@ encode_residuals(uint32_t **buf_ptr, size_t *bufsize_ptr,
         buf[size >> 2] = i;
         size += 4;
     }
-    printf("encoded %lu residuals\n", size >> 2);
+    printf("encoded %lu residuals (%lu bytes)\n", size >> 2, size);
 
     *buf_ptr = buf;
     *bufsize_ptr = size;
@@ -379,7 +363,7 @@ btcode_encode(uint8_t **outbuf_ptr, size_t *outbuf_size_ptr,
 
     frequency_transform(dec_btable, freq_mtx, padded_btable, nmax, enc_tfblk);
     ret = encode(outbuf_ptr, outbuf_size_ptr,
-                 btable, dec_btable, freq_mtx, btable_n, nmax);
+                 padded_btable, dec_btable, freq_mtx, btable_n, nmax);
     goto ret;
 
 alloc_error:
@@ -393,19 +377,23 @@ ret:
 }
 
 static void
-decode_frequencies(int64_t *freq_mtx,
-                   int64_t const *freqs, uint32_t const num_entries)
+decode_frequencies(int64_t *freq_mtx, int64_t const *freqs,
+                   uint32_t const num_entries, uint16_t const n)
 {
-    uint32_t j = 0;
-    for (uint32_t i = 0; i < num_entries; ++i)
-        if (freqs[i] >> 32 == 0x2A * 0x01010101)
+    assert(num_entries != 0);
+    uint32_t i = 0;
+    while (1)
+    {
+        uint32_t const blknum = freqs[i++] >> 32;
+        do
         {
-            uint32_t num_elem = freqs[i] & 0xFFFFFFFF;
-            memset(freq_mtx + j, 0, num_elem << 3);
-            j += num_elem;
-        }
-        else
-            freq_mtx[j++] = freqs[i];
+            int x = blknum * BLKSZ % n + (freqs[i] & 0xFFFFFFFF);
+            int y = (blknum * BLKSZ / n) * BLKSZ + (freqs[i++] >> 32);
+            freq_mtx[y * n + x] = freqs[i++];
+            if (i == num_entries)
+                return;
+        } while ((freqs[i] & 0xFFFFFFFF) != 0x2A * 0x01010101);
+    }
 }
 
 static inline void
@@ -413,7 +401,9 @@ apply_residuals(uint8_t *btable,
                 uint32_t const *indices, unsigned const num_indices)
 {
     for (unsigned i = 0; i < num_indices; ++i)
+    {
         btable[indices[i]] ^= 1;
+    }
 }
 
 int
@@ -431,7 +421,7 @@ btcode_decode(uint8_t **btable_ptr, size_t *btable_n_ptr,
     uint8_t *padded_btable = NULL;
     uint8_t *dec_btable = NULL;
 
-    freq_mtx = malloc(nmax2 * sizeof(*freq_mtx));
+    freq_mtx = calloc(nmax2, sizeof(*freq_mtx));
     if (!freq_mtx)
         goto alloc_error;
     padded_btable = malloc(nmax2);
@@ -441,15 +431,20 @@ btcode_decode(uint8_t **btable_ptr, size_t *btable_n_ptr,
     if (!dec_btable)
         goto alloc_error;
 
-    size_t const frequencies_size = *(uint32_t *)inbuf << 3;
+    uint32_t const num_freq_entries = *(uint32_t *)inbuf;
+    size_t const frequencies_size = num_freq_entries << 3;
     inbuf += 4;
-    size_t const residuals_size = *inbuf++ << 2;
+    uint8_t const num_residuals = *inbuf++;
+    size_t const residuals_size = num_residuals << 2;
 
-    if (frequencies_size > nmax2 || residuals_size > nmax2)
+    if (num_freq_entries == 0 ||
+        (frequencies_size >> 3) > nmax2 ||
+        (residuals_size >> 2) > nmax2)
         goto input_error;
 
-    decode_frequencies(freq_mtx, (int64_t *)inbuf, frequencies_size >> 3);
+    decode_frequencies(freq_mtx, (int64_t *)inbuf, frequencies_size >> 3, nmax);
     inbuf += frequencies_size;
+
     frequency_transform(padded_btable, freq_mtx, NULL, nmax, dec_tfblk);
     apply_residuals(padded_btable, (uint32_t *)inbuf, residuals_size >> 2);
 
@@ -466,6 +461,7 @@ alloc_error:
     goto ret;
 input_error:
     fprintf(stderr, "format mismatch\n");
+    free(dec_btable);
     ret = BTCODE_EGENERIC;
 ret:
     free(padded_btable);
